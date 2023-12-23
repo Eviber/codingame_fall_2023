@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::io;
 use std::str::FromStr;
 
@@ -35,6 +35,9 @@ struct Drone {
     pos: Vec2,
     _emergency: i32,
     battery: i32,
+    target: usize,
+    target_dir: Direction,
+    scanned: Vec<usize>,
 }
 
 impl Drone {
@@ -54,6 +57,34 @@ impl Drone {
             },
             _emergency: emergency,
             battery,
+            target: 0,
+            target_dir: Direction::BottomLeft,
+            scanned: Vec::new(),
+        }
+    }
+
+    fn add_scanned(&mut self, id: usize) {
+        self.scanned.push(id);
+    }
+
+    fn get_dir_pos(&self) -> Vec2 {
+        match self.target_dir {
+            Direction::TopLeft => Vec2 {
+                x: self.pos.x - 800,
+                y: self.pos.y - 800,
+            },
+            Direction::TopRight => Vec2 {
+                x: self.pos.x + 800,
+                y: self.pos.y - 800,
+            },
+            Direction::BottomLeft => Vec2 {
+                x: self.pos.x - 800,
+                y: self.pos.y + 800,
+            },
+            Direction::BottomRight => Vec2 {
+                x: self.pos.x + 800,
+                y: self.pos.y + 800,
+            },
         }
     }
 }
@@ -69,12 +100,34 @@ impl Drones {
         }
     }
 
+    fn get_mut(&mut self, id: usize) -> &mut Drone {
+        let idx = id - self.drones[0]._id as usize;
+        let res = &mut self.drones[idx];
+        assert_eq!(res._id as usize, id);
+        res
+    }
+
     fn update_from_input(&mut self) {
         self.drones.clear();
         let drone_count: usize = get_value();
         self.drones.reserve_exact(drone_count);
         for _ in 0..drone_count {
             self.drones.push(Drone::from_input());
+        }
+    }
+
+    fn update_scanned_from_input(&mut self) {
+        let drone_scan_count: usize = get_value();
+        for _ in 0..drone_scan_count {
+            let input_line = get_line();
+            let mut inputs = input_line.split_whitespace();
+            let drone_id = inputs.next().unwrap().parse().unwrap();
+            if drone_id >= self.drones.len() { // ignore foes drones
+                continue;
+            }
+            let creature_id = inputs.next().unwrap().parse().unwrap();
+            self.get_mut(drone_id).add_scanned(creature_id);
+            eprintln!("drone {} scanned creature {}", drone_id, creature_id);
         }
     }
 }
@@ -123,6 +176,14 @@ impl Creatures {
         res
     }
 
+    fn get(&self, id: usize) -> &Creature {
+        let idx = id - self.creatures[0].id;
+        eprintln!("get creature {} at idx {}", id, idx);
+        let res = &self.creatures[idx];
+        assert_eq!(res.id, id);
+        res
+    }
+
     fn from_input() -> Self {
         let creature_count: usize = get_value();
         let creatures = (0..creature_count)
@@ -164,6 +225,7 @@ impl Creatures {
     }
 
     fn update_scanned_from_input(&mut self) {
+        eprint!("my scan:");
         let scan_count: usize = get_value();
         for _ in 0..scan_count {
             let creature_id: usize = get_value();
@@ -171,6 +233,45 @@ impl Creatures {
             eprint!(" {}", creature_id);
         }
         eprintln!();
+        eprint!("foe scan:");
+        let foe_scan_count: usize = get_value();
+        for _ in 0..foe_scan_count {
+            let creature_id: i32 = get_value();
+            eprint!(" {}", creature_id);
+        }
+        eprintln!();
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl FromStr for Direction {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "TL" => Ok(Direction::TopLeft),
+            "TR" => Ok(Direction::TopRight),
+            "BL" => Ok(Direction::BottomLeft),
+            "BR" => Ok(Direction::BottomRight),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Direction::TopLeft => write!(f, "TL"),
+            Direction::TopRight => write!(f, "TR"),
+            Direction::BottomLeft => write!(f, "BL"),
+            Direction::BottomRight => write!(f, "BR"),
+        }
     }
 }
 
@@ -189,43 +290,35 @@ fn main() {
         let my_score: i32 = get_value();
         let foe_score: i32 = get_value();
         eprintln!("{} - {}", my_score, foe_score);
-        eprint!("my scan:");
         creatures.update_scanned_from_input();
-        eprint!("foe scan:");
-        let foe_scan_count: usize = get_value();
-        for _ in 0..foe_scan_count {
-            let creature_id: i32 = get_value();
-            eprint!(" {}", creature_id);
-        }
-        eprintln!();
         my_drones.update_from_input();
         foes_drones.update_from_input();
-        let drone_scan_count: usize = get_value();
-        for _ in 0..drone_scan_count {
-            let input_line = get_line();
-            let mut inputs = input_line.split_whitespace();
-            let drone_id: i32 = inputs.next().unwrap().parse().unwrap();
-            let creature_id: i32 = inputs.next().unwrap().parse().unwrap();
-            eprintln!("drone {} scanned creature {}", drone_id, creature_id);
-        }
+        my_drones.update_scanned_from_input();
         creatures.update_from_input();
         let radar_blip_count: usize = get_value();
         for _ in 0..radar_blip_count {
             let input_line = get_line();
             let mut inputs = input_line.split_whitespace();
-            let drone_id: i32 = inputs.next().unwrap().parse().unwrap();
-            let creature_id: i32 = inputs.next().unwrap().parse().unwrap();
-            let radar = inputs.next().unwrap().trim().to_string();
+            let drone_id: usize = inputs.next().unwrap().parse().unwrap();
+            let creature_id: usize = inputs.next().unwrap().parse().unwrap();
+            let radar: Direction = inputs.next().unwrap().parse().unwrap();
+            let drone = my_drones.get_mut(drone_id);
+            if drone.target == 0 && !drone.scanned.contains(&creature_id) {
+                drone.target = creature_id;
+                drone.target_dir = radar;
+            }
             eprintln!(
                 "drone {} radar blip {} at {}",
                 drone_id, creature_id, radar
             );
         }
         for drone in &my_drones.drones {
-            let Some(target_pos) = creatures.find_target(drone.pos) else {
-                println!("WAIT 0"); // MOVE <x> <y> <light (1|0)> | WAIT <light (1|0)>
+            if drone.target == 0 {
+                eprintln!("no target for drone {}, going straight up", drone._id);
+                println!("MOVE {} {} 1 eheh", drone.pos.x, 500);
                 continue;
-            };
+            }
+            let target_pos = drone.get_dir_pos();
             print!("MOVE {} {}", target_pos.x, target_pos.y);
             if drone.battery > 15 {
                 print!(" 1");
